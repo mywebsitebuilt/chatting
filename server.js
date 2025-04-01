@@ -13,11 +13,14 @@ const io = socketIo(server, { cors: { origin: "*" } });
 app.use(cors());
 app.use(express.json());
 
-// Connect to MongoDB
 mongoose.connect("mongodb+srv://sfayazmr:Abcdef067@cluster01.ibbs2.mongodb.net/chatDB?retryWrites=true&w=majority", {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-});
+})
+.then(() => console.log("MongoDB connected successfully!"))
+.catch(err => console.error("MongoDB connection error:", err));
+
+
 
 // User Schema
 const userSchema = new mongoose.Schema({
@@ -34,13 +37,10 @@ const messageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 });
 const Message = mongoose.model("Message", messageSchema);
-
 // User Registration
 app.post("/api/register", async (req, res) => {
   try {
     const { username, password } = req.body;
-    const existingUser = await User.findOne({ username });
-    if (existingUser) return res.status(400).json({ message: "User already exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ username, password: hashedPassword });
@@ -97,6 +97,36 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
+});
+// Edit Message
+app.put("/api/messages/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { messageText } = req.body;
+    
+    // Find and update the message
+    const message = await Message.findByIdAndUpdate(id, { messageText }, { new: true });
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    res.json({ message: "Message updated successfully", updatedMessage: message });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Delete Message
+app.delete("/api/messages/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find and delete the message
+    const message = await Message.findByIdAndDelete(id);
+    if (!message) return res.status(404).json({ message: "Message not found" });
+
+    res.json({ message: "Message deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
 });
 
 // Start Server
