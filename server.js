@@ -1,3 +1,4 @@
+// backend/server.js
 const express = require("express");
 const mongoose = require("mongoose");
 const http = require("http");
@@ -13,14 +14,15 @@ const io = socketIo(server, { cors: { origin: "*" } });
 app.use(cors());
 app.use(express.json());
 
-mongoose.connect("mongodb+srv://sfayazmr:Abcdef067@cluster01.ibbs2.mongodb.net/chatDB?retryWrites=true&w=majority", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log("MongoDB connected successfully!"))
-.catch(err => console.error("MongoDB connection error:", err));
-
-
+mongoose.connect(
+  "mongodb+srv://sfayazmr:Abcdef067@cluster01.ibbs2.mongodb.net/chatDB?retryWrites=true&w=majority",
+  {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  }
+)
+  .then(() => console.log("MongoDB connected successfully!"))
+  .catch((err) => console.error("MongoDB connection error:", err));
 
 // User Schema
 const userSchema = new mongoose.Schema({
@@ -33,10 +35,16 @@ const User = mongoose.model("User", userSchema);
 const messageSchema = new mongoose.Schema({
   sender: String,
   receiver: String,
-  messageText: String,
+  messageText: { type: String, default: "" },
   timestamp: { type: Date, default: Date.now },
+  file: {
+    name: { type: String },
+    type: { type: String },
+    data: { type: Buffer }, // Ensure data is stored as Buffer
+  },
 });
 const Message = mongoose.model("Message", messageSchema);
+
 // User Registration
 app.post("/api/register", async (req, res) => {
   try {
@@ -79,33 +87,63 @@ app.get("/api/messages", async (req, res) => {
   }
 });
 
+// Fetch User List
+app.get("/api/users", async (req, res) => {
+  try {
+    const users = await User.find().select("username");
+    res.json(users);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 // Socket.io for Real-time Chat
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  socket.on("sendMessage", async ({ sender, receiver, messageText }) => {
+  socket.on("sendMessage", async ({ sender, receiver, messageText, file }) => {
     try {
-      const newMessage = new Message({ sender, receiver, messageText });
+      let newMessageData = { sender, receiver, timestamp: Date.now() };
+  
+      if (file) {
+        newMessageData.file = {
+          name: file.name,
+          type: file.type,
+          data: Buffer.from(file.data, "base64"), // Convert base64 to Buffer
+        };
+      } else {
+        newMessageData.messageText = messageText;
+      }
+  
+      const newMessage = new Message(newMessageData);
       await newMessage.save();
-
+  
       io.emit("newMessage", newMessage);
     } catch (error) {
       console.error("Error sending message:", error);
     }
+  });
+  
+  socket.on("typing", ({ user, isTyping }) => {
+    io.emit("typing", { user, isTyping });
   });
 
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
 });
+
 // Edit Message
 app.put("/api/messages/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { messageText } = req.body;
-    
-    // Find and update the message
-    const message = await Message.findByIdAndUpdate(id, { messageText }, { new: true });
+
+    const message = await Message.findByIdAndUpdate(
+      id,
+      { messageText },
+      { new: true }
+    );
     if (!message) return res.status(404).json({ message: "Message not found" });
 
     res.json({ message: "Message updated successfully", updatedMessage: message });
@@ -118,8 +156,6 @@ app.put("/api/messages/:id", async (req, res) => {
 app.delete("/api/messages/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
-    // Find and delete the message
     const message = await Message.findByIdAndDelete(id);
     if (!message) return res.status(404).json({ message: "Message not found" });
 
